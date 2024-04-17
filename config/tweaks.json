@@ -2689,7 +2689,7 @@
     "WPFToggleTaskbarWidgets": {
     "Content": "Taskbar Widgets",
     "Description": "If Enabled then Widgets Icon in Taskbar will be shown.",
-    "Type": "Toggle"
+    "Type": "Toggle",
     "registry": [
       {
         "Path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
