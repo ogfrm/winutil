@@ -42,6 +42,15 @@
       "
     ]
   },
+  "WPFTweaksEndTaskOnTaskbar": {
+    "Content": "Enable End Task With Right Click",
+    "Description": "Enables option to end task when right clicking a program in the taskbar",
+    "InvokeScript": [
+      "
+      Set-ItemProperty -Path \"HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\TaskbarDeveloperSettings\" -Name \"TaskbarEndTask\" -Type \"DWord\" -Value \"1\"
+      "
+    ]
+  },
   "WPFTweaksOO": {
     "Content": "Run OO Shutup",
     "Description": "Runs OO Shutup from https://www.oo-software.com/en/shutup10",
@@ -404,6 +413,13 @@
         "Name": "Scheduling Category",
         "Value": "High",
         "Type": "String"
+      },
+      {
+        "Path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement",
+        "OriginalValue": "1",
+        "Name": "ScoobeSystemSettingEnabled",
+        "Value": "0",
+        "Type": "DWord"
       }
     ],
     "InvokeScript": [
@@ -2384,6 +2400,7 @@
 
         Write-Host \"Removing OneDrive leftovers\"
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \"$env:localappdata\\Microsoft\\OneDrive\"
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \"$env:localappdata\\OneDrive\"
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \"$env:programdata\\Microsoft OneDrive\"
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \"$env:systemdrive\\OneDriveTemp\"
         # check if directory is empty before removing:
@@ -2449,18 +2466,35 @@
     "Content": "Set Classic Right-Click Menu ",
     "Description": "Great Windows 11 tweak to bring back good context menus when right clicking things in explorer.",
     "InvokeScript": [
-      "New-Item -Path \"HKCU:\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\" -Name \"InprocServer32\" -force -value \"\" "
+      "
+      New-Item -Path \"HKCU:\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\" -Name \"InprocServer32\" -force -value \"\"
+      Write-Host Restarting explorer.exe ...
+      $process = Get-Process -Name \"explorer\"
+      Stop-Process -InputObject $process
+      "
     ],
     "UndoScript": [
       "
       Remove-Item -Path \"HKCU:\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\" -Recurse -Confirm:$false -Force
-      Write-Host Restart Needed for change
+      # Restarting Explorer in the Undo Script might not be necessary, as the Registry change without restarting Explorer does work, but just to make sure.
+      Write-Host Restarting explorer.exe ...
+      $process = Get-Process -Name \"explorer\"
+      Stop-Process -InputObject $process
       "
     ]
   },
   "WPFTweaksEnableipsix": {
     "Content": "Enable IPv6",
     "Description": "Enables IPv6.",
+    "registry": [
+      {
+        "Path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters",
+        "Name": "DisabledComponents",
+        "Value": "0",
+        "OriginalValue": "0",
+        "Type": "DWord"
+      }
+    ],
     "InvokeScript": [
       "Enable-NetAdapterBinding -Name \"*\" -ComponentID ms_tcpip6"
     ],
@@ -2471,6 +2505,15 @@
   "WPFTweaksDisableipsix": {
     "Content": "Disable IPv6",
     "Description": "Disables IPv6.",
+    "registry": [
+      {
+        "Path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters",
+        "Name": "DisabledComponents",
+        "Value": "255",
+        "OriginalValue": "0",
+        "Type": "DWord"
+      }
+    ],
     "InvokeScript": [
       "Disable-NetAdapterBinding -Name \"*\" -ComponentID ms_tcpip6"
     ],
@@ -2639,6 +2682,20 @@
         "Name": "Flags",
         "Value": "510",
         "OriginalValue": "58",
+        "Type": "DWord"
+      }
+    ]
+  },
+    "WPFToggleTaskbarWidgets": {
+    "Content": "Taskbar Widgets",
+    "Description": "If Enabled then Widgets Icon in Taskbar will be shown.",
+    "Type": "Toggle"
+    "registry": [
+      {
+        "Path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+        "Name": "TaskbarDa",
+        "Value": "1",
+        "OriginalValue": "0",
         "Type": "DWord"
       }
     ]

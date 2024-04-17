@@ -57,10 +57,30 @@ public class PowerManagement {
     $mountDir = $sync.MicrowinMountDir.Text
     $scratchDir = $sync.MicrowinScratchDir.Text
 
+	# Detect if the Windows image is an ESD file and convert it to WIM
+	if (-not (Test-Path -Path $mountDir\sources\install.wim -PathType Leaf) -and (Test-Path -Path $mountDir\sources\install.esd -PathType Leaf))
+	{
+		Write-Host "Exporting Windows image to a WIM file, keeping the index we want to work on. This can take several minutes, depending on the performance of your computer..."
+		Export-WindowsImage -SourceImagePath $mountDir\sources\install.esd -SourceIndex $index -DestinationImagePath $mountDir\sources\install.wim -CompressionType "Max"
+		if ($?)
+		{
+            Remove-Item -Path $mountDir\sources\install.esd -Force
+			# Since we've already exported the image index we wanted, switch to the first one
+			$index = 1
+		}
+		else
+		{
+            $msg = "The export process has failed and MicroWin processing cannot continue"
+            Write-Host "Failed to export the image"
+            [System.Windows.MessageBox]::Show($msg, "Winutil", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return
+		}
+	}
+
     $imgVersion = (Get-WindowsImage -ImagePath $mountDir\sources\install.wim -Index $index).Version
 
     # Detect image version to avoid performing MicroWin processing on Windows 8 and earlier
-    if ((Test-CompatibleImage $imgVersion) -eq $false)
+    if ((Test-CompatibleImage $imgVersion $([System.Version]::new(10,0,10240,0))) -eq $false)
     {
 		$msg = "This image is not compatible with MicroWin processing. Make sure it isn't a Windows 8 or earlier image."
         $dlg_msg = $msg + "`n`nIf you want more information, the version of the image selected is $($imgVersion)`n`nIf an image has been incorrectly marked as incompatible, report an issue to the developers."
@@ -80,8 +100,16 @@ public class PowerManagement {
 	try {
 
 		Write-Host "Mounting Windows image. This may take a while."
-		dism /mount-image /imagefile:$mountDir\sources\install.wim /index:$index /mountdir:$scratchDir
-		Write-Host "Mounting complete! Performing removal of applications..."
+        Mount-WindowsImage -ImagePath "$mountDir\sources\install.wim" -Index $index -Path "$scratchDir"
+        if ($?)
+        {
+		    Write-Host "Mounting complete! Performing removal of applications..."
+        }
+        else
+        {
+            Write-Host "Could not mount image. Exiting..."
+            return
+        }
 
 		if ($injectDrivers)
 		{
@@ -89,7 +117,7 @@ public class PowerManagement {
 			if (Test-Path $driverPath)
 			{
 				Write-Host "Adding Windows Drivers image($scratchDir) drivers($driverPath) "
-				dism /English /image:$scratchDir /add-driver /driver:$driverPath /recurse | Out-Host
+				Add-WindowsDriver -Path "$scratchDir" -Recurse -Driver "$driverPath"
 			}
 			else 
 			{
@@ -279,13 +307,13 @@ public class PowerManagement {
 		Write-Host "Cleanup complete."
 
 		Write-Host "Unmounting image..."
-		dism /unmount-image /mountdir:$scratchDir /commit
+        Dismount-WindowsImage -Path $scratchDir -Save
 	} 
 	
 	try {
 
 		Write-Host "Exporting image into $mountDir\sources\install2.wim"
-		dism /Export-Image /SourceImageFile:"$mountDir\sources\install.wim" /SourceIndex:$index /DestinationImageFile:"$mountDir\sources\install2.wim" /compress:max
+        Export-WindowsImage -SourceImagePath "$mountDir\sources\install.wim" -SourceIndex $index -DestinationImagePath "$mountDir\sources\install2.wim" -CompressionType "Max"
 		Write-Host "Remove old '$mountDir\sources\install.wim' and rename $mountDir\sources\install2.wim"
 		Remove-Item "$mountDir\sources\install.wim"
 		Rename-Item "$mountDir\sources\install2.wim" "$mountDir\sources\install.wim"
@@ -299,7 +327,7 @@ public class PowerManagement {
 
 		# Next step boot image		
 		Write-Host "Mounting boot image $mountDir\sources\boot.wim into $scratchDir"
-		dism /mount-image /imagefile:"$mountDir\sources\boot.wim" /index:2 /mountdir:"$scratchDir"
+        Mount-WindowsImage -ImagePath "$mountDir\sources\boot.wim" -Index 2 -Path "$scratchDir"
 
 		if ($injectDrivers)
 		{
@@ -307,7 +335,7 @@ public class PowerManagement {
 			if (Test-Path $driverPath)
 			{
 				Write-Host "Adding Windows Drivers image($scratchDir) drivers($driverPath) "
-				dism /English /image:$scratchDir /add-driver /driver:$driverPath /recurse | Out-Host
+				Add-WindowsDriver -Path "$scratchDir" -Driver "$driverPath" -Recurse
 			}
 			else 
 			{
@@ -345,7 +373,7 @@ public class PowerManagement {
 		reg unload HKLM\zSYSTEM
 
 		Write-Host "Unmounting image..."
-		dism /unmount-image /mountdir:$scratchDir /commit 
+        Dismount-WindowsImage -Path $scratchDir -Save
 
 		Write-Host "Creating ISO image"
 

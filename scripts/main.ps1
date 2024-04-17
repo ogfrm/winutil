@@ -54,7 +54,12 @@ $inputXML = $inputXML -replace 'mc:Ignorable="d"', '' -replace "x:N", 'N' -repla
 $app = (Get-ItemProperty -path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize').AppsUseLightTheme
 $system = (Get-ItemProperty -path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize').SystemUsesLightTheme
 if($app -eq 0 -and $system -eq 0){
-    $ctttheme = 'Matrix'
+    if (Invoke-WinUtilGPU -eq $True) {
+        $ctttheme = 'Matrix'
+    }
+    else {
+        $ctttheme = 'Dark'
+    }
 }
 else {
     $ctttheme = 'Classic'
@@ -376,7 +381,7 @@ $sync["CheckboxFilter"].Add_TextChanged({
             continue
         }
 
-        $textToSearch = $sync.CheckboxFilter.Text
+        $textToSearch = $sync.CheckboxFilter.Text.ToLower()
         $checkBoxName = $CheckBox.Key
         $textBlockName = $checkBoxName + "Link"
 

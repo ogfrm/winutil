@@ -90,6 +90,29 @@ function Invoke-WPFGetIso {
         return
     }
 
+    # Detect the file size of the ISO and compare it with the free space of the system drive
+    $isoSize = (Get-Item -Path $filePath).Length
+    Write-Debug "Size of ISO file: $($isoSize) bytes"
+    # Use this procedure to get the free space of the drive depending on where the user profile folder is stored.
+    # This is done to guarantee a dynamic solution, as the installation drive may be mounted to a letter different than C
+    $driveSpace = (Get-Volume -DriveLetter ([IO.Path]::GetPathRoot([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)).Replace(":\", "").Trim())).SizeRemaining
+    Write-Debug "Free space on installation drive: $($driveSpace) bytes"
+    if ($driveSpace -lt ($isoSize * 2))
+    {
+        # It's not critical and we _may_ continue. Output a warning
+        Write-Warning "You may not have enough space for this operation. Proceed at your own risk."
+    }
+    elseif ($driveSpace -lt $isoSize)
+    {
+        # It's critical and we can't continue. Output an error
+        Write-Host "You don't have enough space for this operation. You need at least $([Math]::Round(($isoSize / ([Math]::Pow(1024, 2))) * 2, 2)) MB of free space to copy the ISO files to a temp directory and to be able to perform additional operations."
+        return
+    }
+    else 
+    {
+        Write-Host "You have enough space for this operation."
+    }
+
     try {
         Write-Host "Mounting Iso. Please wait."
         $mountedISO = Mount-DiskImage -PassThru "$filePath"
@@ -122,6 +145,19 @@ function Invoke-WPFGetIso {
 
          $sync.MicrowinScratchDirBox.Text = Join-Path   $sync.MicrowinScratchDirBox.Text.Trim() '\'
 
+    }
+    
+    # Detect if the folders already exist and remove them
+    if (($sync.MicrowinMountDir.Text -ne "") -and (Test-Path -Path $sync.MicrowinMountDir.Text))
+    {
+        try {
+            Write-Host "Deleting temporary files from previous run. Please wait..."
+            Remove-Item -Path $sync.MicrowinMountDir.Text -Recurse -Force
+            Remove-Item -Path $sync.MicrowinScratchDir.Text -Recurse -Force
+        }
+        catch {
+            Write-Host "Could not delete temporary files. You need to delete those manually."
+        }
     }
 
     Write-Host "Setting up mount dir and scratch dirs"
@@ -160,12 +196,17 @@ function Invoke-WPFGetIso {
         $wimFile = "$mountDir\sources\install.wim"
         Write-Host "Getting image information $wimFile"
 
-        if (-not (Test-Path -Path $wimFile -PathType Leaf))
+        if ((-not (Test-Path -Path $wimFile -PathType Leaf)) -and (-not (Test-Path -Path $wimFile.Replace(".wim", ".esd").Trim() -PathType Leaf)))
         {
-            $msg = "Install.wim file doesn't exist in the image, this could happen if you use unofficial Windows images, or a Media creation tool, which creates a final image that can not be modified. Please don't use shady images from the internet, use only official images. Here are instructions how to download ISO images if the Microsoft website is not showing the link to download and ISO. https://www.techrepublic.com/article/how-to-download-a-windows-10-iso-file-without-using-the-media-creation-tool/"
+            $msg = "Neither install.wim nor install.esd exist in the image, this could happen if you use unofficial Windows images. Please don't use shady images from the internet, use only official images. Here are instructions how to download ISO images if the Microsoft website is not showing the link to download and ISO. https://www.techrepublic.com/article/how-to-download-a-windows-10-iso-file-without-using-the-media-creation-tool/"
             Write-Host $msg
             [System.Windows.MessageBox]::Show($msg, "Winutil", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
             throw
+        }
+        elseif ((-not (Test-Path -Path $wimFile -PathType Leaf)) -and (Test-Path -Path $wimFile.Replace(".wim", ".esd").Trim() -PathType Leaf))
+        {
+            Write-Host "Install.esd found on the image. It needs to be converted to a WIM file in order to begin processing"
+            $wimFile = $wimFile.Replace(".wim", ".esd").Trim()
         }
         $sync.MicrowinWindowsFlavors.Items.Clear()
         Get-WindowsImage -ImagePath $wimFile | ForEach-Object {

@@ -18,28 +18,23 @@ function Test-CompatibleImage() {
 <#
 
     .SYNOPSIS
-        Checks the version of a Windows image and determines whether or not it is compatible depending on the Major property
+        Checks the version of a Windows image and determines whether or not it is compatible with a specific feature depending on a desired version
 
-    .PARAMETER imgVersion
-        The version of the Windows image
+    .PARAMETER Name
+        imgVersion - The version of the Windows image
+        desiredVersion - The version to compare the image version with
 
 #>
 
     param
     (
-        [Parameter(Mandatory = $true)] [string] $imgVersion
+        [Parameter(Mandatory = $true, Position=0)] [string] $imgVersion,
+        [Parameter(Mandatory = $true, Position=1)] [Version] $desiredVersion
     )
 
     try {
         $version = [Version]$imgVersion
-        if ($version.Major -ge 10)
-        {
-            return $True
-        }
-        else
-        {
-            return $False
-        }
+        return $version -ge $desiredVersion
     } catch {
         return $False
     }
@@ -59,38 +54,39 @@ function Remove-Features([switch] $dumpFeatures = $false, [switch] $keepDefender
         Remove-Features -keepDefender:$false
 
 #>
-	$appxlist = dism /English /image:$scratchDir /Get-Features | Select-String -Pattern "Feature Name : " -CaseSensitive -SimpleMatch
-	$appxlist = $appxlist -split "Feature Name : " | Where-Object {$_}
+	$featlist = (Get-WindowsOptionalFeature -Path $scratchDir).FeatureName
 	if ($dumpFeatures)
 	{
-		$appxlist > allfeaturesdump.txt
+		$featlist > allfeaturesdump.txt
 	}
 
-	$appxlist = $appxlist | Where-Object {
+	$featlist = $featlist | Where-Object {
 		$_ -NotLike "*Printing*" -AND
 		$_ -NotLike "*TelnetClient*" -AND
 		$_ -NotLike "*PowerShell*" -AND
-		$_ -NotLike "*NetFx*"
+		$_ -NotLike "*NetFx*" -AND
+		$_ -NotLike "*Media*" -AND
+		$_ -NotLike "*NFS*"
 	}
 
-	if ($keepDefender) { $appxlist = $appxlist | Where-Object { $_ -NotLike "*Defender*" }}
+	if ($keepDefender) { $featlist = $featlist | Where-Object { $_ -NotLike "*Defender*" }}
 
-	foreach($feature in $appxlist)
+	foreach($feature in $featlist)
 	{
 		$status = "Removing feature $feature"
-		Write-Progress -Activity "Removing features" -Status $status -PercentComplete ($counter++/$appxlist.Count*100)
+		Write-Progress -Activity "Removing features" -Status $status -PercentComplete ($counter++/$featlist.Count*100)
 		Write-Debug "Removing feature $feature"
-		# dism /image:$scratchDir /Disable-Feature /FeatureName:$feature /Remove /NoRestart > $null
+		Disable-WindowsOptionalFeature -Path "$scratchDir" -FeatureName $feature -Remove  -ErrorAction SilentlyContinue -NoRestart
 	}
 	Write-Progress -Activity "Removing features" -Status "Ready" -Completed
+	Write-Host "You can re-enable the disabled features at any time, using either Windows Update or the SxS folder in <installation media>\Sources."
 }
 
 function Remove-Packages
 {
-	$appxlist = dism /English /Image:$scratchDir /Get-Packages | Select-String -Pattern "Package Identity : " -CaseSensitive -SimpleMatch
-	$appxlist = $appxlist -split "Package Identity : " | Where-Object {$_}
+	$pkglist = (Get-WindowsPackage -Path "$scratchDir").PackageName
 
-	$appxlist = $appxlist | Where-Object {
+	$pkglist = $pkglist | Where-Object {
 			$_ -NotLike "*ApplicationModel*" -AND
 			$_ -NotLike "*indows-Client-LanguagePack*" -AND
 			$_ -NotLike "*LanguageFeatures-Basic*" -AND
@@ -128,11 +124,18 @@ function Remove-Packages
 			$_ -NotLike "*UI.XaML*"	
 		} 
 
-	foreach ($appx in $appxlist)
+	foreach ($pkg in $pkglist)
 	{
-		$status = "Removing $appx"
-		Write-Progress -Activity "Removing Apps" -Status $status -PercentComplete ($counter++/$appxlist.Count*100)
-		dism /English /image:$scratchDir /Remove-Package /PackageName:$appx /NoRestart
+		try {
+			$status = "Removing $pkg"
+			Write-Progress -Activity "Removing Apps" -Status $status -PercentComplete ($counter++/$pkglist.Count*100)
+			Remove-WindowsPackage -Path "$scratchDir" -PackageName $pkg -NoRestart -ErrorAction SilentlyContinue
+		}
+		catch {
+			# This can happen if the package that is being removed is a permanent one, like FodMetadata
+			Write-Host "Could not remove OS package $($pkg)"
+			continue
+		}
 	}
 	Write-Progress -Activity "Removing Apps" -Status "Ready" -Completed
 }
@@ -172,7 +175,7 @@ function Remove-ProvisionedPackages([switch] $keepSecurity = $false)
 	    {
 		    $status = "Removing Provisioned $($appx.PackageName)"
 		    Write-Progress -Activity "Removing Provisioned Apps" -Status $status -PercentComplete ($counter++/$appxProvisionedPackages.Count*100)
-		    dism /English /image:$scratchDir /Remove-ProvisionedAppxPackage /PackageName:$($appx.PackageName) /NoRestart
+			Remove-AppxProvisionedPackage -Path $scratchDir -PackageName $appx.PackageName -ErrorAction SilentlyContinue
 	    }
 	    Write-Progress -Activity "Removing Provisioned Apps" -Status "Ready" -Completed
     }
@@ -200,7 +203,7 @@ function Copy-ToUSB([string] $fileToCopy)
 					Write-Progress -Activity "Copying File" -Status "Progress" -PercentComplete $completed -CurrentOperation ("{0:N2} MB / {1:N2} MB" -f ($_.BytesTransferred / 1MB), ($totalSize / 1MB))
 				}
 
-			Write-Host "File copied to Ventoy drive $($volume.DriveLette)"
+			Write-Host "File copied to Ventoy drive $($volume.DriveLetter)"
 			return
 		}
 	}
@@ -247,7 +250,7 @@ function Remove-FileOrDirectory([string] $pathToDelete, [string] $mask = "", [sw
 
 	foreach($itemToDelete in $itemsToDelete)
 	{
-		$status = "Deleteing $($itemToDelete)"
+		$status = "Deleting $($itemToDelete)"
 		Write-Progress -Activity "Removing Items" -Status $status -PercentComplete ($counter++/$itemsToDelete.Count*100)
 
 		if (Test-Path -Path "$($itemToDelete)" -PathType Container) 
@@ -321,7 +324,7 @@ function New-Unattend {
 	<unattend xmlns="urn:schemas-microsoft-com:unattend"
 			xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
 			xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-
+        <#REPLACEME#>
 		<settings pass="auditUser">
 			<component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 				<RunSynchronous>
@@ -362,7 +365,27 @@ function New-Unattend {
 		</settings>
 	</unattend>
 '@
-	$unattend | Out-File -FilePath "$env:temp\unattend.xml" -Force
+    $specPass = @'
+<settings pass="specialize">
+            <component name="Microsoft-Windows-SQMApi" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                <CEIPEnabled>0</CEIPEnabled>
+            </component>
+            <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                <ConfigureChatAutoInstall>false</ConfigureChatAutoInstall>
+            </component>
+        </settings>
+'@
+    if ((Test-CompatibleImage $imgVersion $([System.Version]::new(10,0,22000,1))) -eq $false)
+    {
+        # Replace the placeholder text with an empty string to make it valid for Windows 10 Setup
+        $unattend = $unattend.Replace("<#REPLACEME#>", "").Trim()
+    }
+    else
+    {
+        # Replace the placeholder text with the Specialize pass
+        $unattend = $unattend.Replace("<#REPLACEME#>", $specPass).Trim()
+    }
+	$unattend | Out-File -FilePath "$env:temp\unattend.xml" -Force -Encoding utf8
 }
 
 function New-CheckInstall {
@@ -622,6 +645,13 @@ function New-FirstRun {
 	$shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"$command`""
 	# Save the shortcut
 	$shortcut.Save()
+	
+        # Make the shortcut have 'Run as administrator' property on
+        $bytes = [System.IO.File]::ReadAllBytes($shortcutPath)
+        # Set byte value at position 0x15 in hex, or 21 in decimal, from the value 0x00 to 0x20 in hex
+        $bytes[0x15] = $bytes[0x15] -bor 0x20
+        [System.IO.File]::WriteAllBytes($shortcutPath, $bytes)
+        
 	Write-Host "Shortcut created at: $shortcutPath"
 	# 
 	# Done create WinUtil shortcut on the desktop

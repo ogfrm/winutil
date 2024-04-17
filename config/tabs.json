@@ -10,7 +10,7 @@
       "InvokeScript": ["Invoke-WPFTab WPFTab1BT"],
       "Buttons": {
         "WPFinstall": {
-          "Content": " Install Selected",
+          "Content": " Install/Upgrade Selected",
           "Type": "Button",
           "InvokeScript": ["Invoke-WPFInstall"]
         },
